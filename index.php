@@ -9,13 +9,11 @@ header('Access-Control-Allow-Headers: Origin, Content-Type, X-Auth-Token , Autho
 require($_SERVER["DOCUMENT_ROOT"] . "/bitrix/modules/main/include/prolog_before.php");
 require_once $_SERVER["DOCUMENT_ROOT"] . "/v1/class/RestMuseum.php";
 
-$arData = [
-    'url' => $_SERVER["REQUEST_URI"],
-    'get' => $_GET,
-    'post' => $_POST
-];
+$url = $_SERVER["REQUEST_URI"];
+$get = $_GET;
+$post = $_POST;
 
-$dataClass = new RestMuseum($arData);
+$dataClass = new RestMuseum($url, $get, $post);
 $result = $dataClass->GetData();
 
 echo json_encode($result, JSON_UNESCAPED_UNICODE);
