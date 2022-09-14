@@ -13,7 +13,6 @@ class RestMuseum
     const IBLOCK_ID_PHOTO = 20;
     const IBLOCK_ID_VIDEO = 21;
 
-
     public function __construct($url = '', $get = [], $post = [])
     {
         $this->method = $this->GetMethod($url);
@@ -66,7 +65,7 @@ class RestMuseum
 
         if ($countPageNav >= $get["_page"]) {
             $arSort = ["ACTIVE_FROM" => "ASC", "SORT" => "ASC"];
-            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_EVENTS, "INCLUDE_SUBSECTIONS" => "Y"];
+            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_EVENTS, "INCLUDE_SUBSECTIONS" => "Y", "ACTIVE" => "Y"];
             $arSelect = [
                 "ID",
                 "ACTIVE_FROM",
@@ -135,7 +134,7 @@ class RestMuseum
 
         if ($countPageNav >= $get["_page"]) {
             $arSort = ["ACTIVE_FROM" => "DESC", "SORT" => "ASC"];
-            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_NEWS, "INCLUDE_SUBSECTIONS" => "Y"];
+            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_NEWS, "INCLUDE_SUBSECTIONS" => "Y", "ACTIVE" => "Y"];
             $arSelect = [
                 "ID",
                 "NAME",
@@ -176,20 +175,24 @@ class RestMuseum
     private function GetProductList(): array
     {
         $data = [];
-        $data["items"] = [];
-        $data["pages"] = 0;
         $get = $this->get;
+        if (empty($get["_id"])) {
+            $data["items"] = [];
+            $data["pages"] = 0;
+        }
 
         if (!\Bitrix\Main\Loader::includeModule('iblock')) {
             return [];
         }
 
-        $countElement = $this->GetCountElements(self::IBLOCK_ID_PRODUCT);
-        $countPageNav = $this->GetCountPageNav($countElement, $get["_limit"]);
+        if (empty($get["_id"])) {
+            $countElement = $this->GetCountElements(self::IBLOCK_ID_PRODUCT);
+            $countPageNav = $this->GetCountPageNav($countElement, $get["_limit"]);
+        }
 
         if ($countPageNav >= $get["_page"]) {
             $arSort = ["SORT" => "ASC", "NAME" => "ASC"];
-            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_PRODUCT, "INCLUDE_SUBSECTIONS" => "Y"];
+            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_PRODUCT, "ACTIVE" => "Y"];
             $arSelect = [
                 "ID",
                 "NAME",
@@ -203,31 +206,76 @@ class RestMuseum
 
             if (!empty($get["_cat"])) {
                 $arFilter["SECTION_ID"] = $get["_cat"];
+                $arFilter["INCLUDE_SUBSECTIONS"] = "Y";
+            }
+            if (!empty($get["_id"])) {
+                $arFilter["ID"] = $get["_id"];
             }
 
             $arNavStartParams = !empty($get["_page"]) ? ["iNumPage" => $get["_page"], "nPageSize" => $get["_limit"]] : false;
 
             $itemGetList = CIBlockElement::GetList($arSort, $arFilter, false, $arNavStartParams, $arSelect);
+
             while ($item = $itemGetList->GetNext()) {
-                $data["items"][] = [
-                    "id" => $item["ID"],
-                    "title" => $item["NAME"],
-                    "description" => $item["PREVIEW_TEXT"],
-                    "content" => $item["DETAIL_TEXT"],
-                    "preview" => $this->GetPicturePath($item["PREVIEW_PICTURE"], 370, 370),
-                    "images" => CFile::GetPath($item["DETAIL_PICTURE"]),
-                    "price" => $item["PROPERTY_PRICE_VALUE"],
-                    "cat" => $item["SECTION_ID"]
-                ];
+                if (empty($get["_id"])) {
+                    $data["items"][$item["ID"]] = [
+                        "id" => $item["ID"],
+                        "title" => $item["NAME"],
+                        "description" => $item["PREVIEW_TEXT"],
+                        "content" => $item["DETAIL_TEXT"],
+                        "preview" => $this->GetPicturePath($item["PREVIEW_PICTURE"], 370, 370),
+                        "images" => $this->GetSomeFiles(self::IBLOCK_ID_PRODUCT, $item["ID"], "GALLERY"),
+                        "price" => $item["PROPERTY_PRICE_VALUE"],
+                        "cat" => $item["SECTION_ID"]
+                    ];
+                } else {
+                    $data = [
+                        "id" => $item["ID"],
+                        "title" => $item["NAME"],
+                        "description" => $item["PREVIEW_TEXT"],
+                        "content" => $item["DETAIL_TEXT"],
+                        "preview" => $this->GetPicturePath($item["PREVIEW_PICTURE"], 370, 370),
+                        "images" => $this->GetSomeFiles(self::IBLOCK_ID_PRODUCT, $item["ID"], "GALLERY"),
+                        "price" => $item["PROPERTY_PRICE_VALUE"],
+                        "cat" => $item["SECTION_ID"]
+                    ];
+                }
             }
         }
 
-        if (!empty($data["items"])) {
+        $data["items"] = array_values($data["items"]);
+
+        if (!empty($data["items"]) && empty($get["_id"])) {
             header("X-Total-Count: " . $countPageNav);
             $data["pages"] = $countPageNav;
         }
 
         return $data;
+    }
+
+    private function GetSomeFiles($IBLOCK_ID, $ID, $propertyCode): array
+    {
+        $files = [];
+
+        if (!\Bitrix\Main\Loader::includeModule('iblock')) {
+            return [];
+        }
+
+        $arSort = ["SORT" => "ASC"];
+        $arFilter = ["IBLOCK_ID" => $IBLOCK_ID, "ID" => $ID, "ACTIVE" => "Y"];
+        $arSelect = ["ID", "NAME", "PROPERTY_" . $propertyCode];
+        $itemGetList = CIBlockElement::GetList($arSort, $arFilter, false, false, $arSelect);
+        while ($item = $itemGetList->GetNext()) {
+            if (is_array($item["PROPERTY_" . $propertyCode . "_VALUE"])) {
+                foreach ($item["PROPERTY_" . $propertyCode . "_VALUE"] as $galleryItem) {
+                    $files[] = CFile::GetPath($galleryItem);
+                }
+            } else {
+                $files[] = CFile::GetPath($item["PROPERTY_" . $propertyCode . "_VALUE"]);
+            }
+        }
+
+        return $files;
     }
 
     private function GetCollectionList(): array
@@ -246,7 +294,7 @@ class RestMuseum
 
         if ($countPageNav >= $get["_page"]) {
             $arSort = ["SORT" => "ASC", "NAME" => "ASC"];
-            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_COLLECTION, "INCLUDE_SUBSECTIONS" => "Y"];
+            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_COLLECTION, "INCLUDE_SUBSECTIONS" => "Y", "ACTIVE" => "Y"];
             $arSelect = [
                 "ID",
                 "NAME",
@@ -299,7 +347,7 @@ class RestMuseum
 
         if ($countPageNav >= $get["_page"]) {
             $arSort = ["SORT" => "ASC", "NAME" => "ASC"];
-            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_PHOTO, "INCLUDE_SUBSECTIONS" => "Y"];
+            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_PHOTO, "INCLUDE_SUBSECTIONS" => "Y", "ACTIVE" => "Y"];
             $arSelect = [
                 "ID",
                 "NAME",
@@ -350,7 +398,7 @@ class RestMuseum
 
         if ($countPageNav >= $get["_page"]) {
             $arSort = ["SORT" => "ASC", "NAME" => "ASC"];
-            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_VIDEO, "INCLUDE_SUBSECTIONS" => "Y"];
+            $arFilter = ["IBLOCK_ID" => self::IBLOCK_ID_VIDEO, "INCLUDE_SUBSECTIONS" => "Y", "ACTIVE" => "Y"];
             $arSelect = [
                 "ID",
                 "NAME",
@@ -389,26 +437,60 @@ class RestMuseum
     {
         $data = [];
         $post = $this->post;
+        $email = $post["email"];
 
         if (!\Bitrix\Main\Loader::includeModule('form')) {
             return [];
         }
+        if (!\Bitrix\Main\Loader::includeModule('subscribe')) {
+            return [];
+        }
 
-        if (!empty($post["email"])) {
-            $FORM_ID = 1;
-            $FIELDS = [
-                "form_text_1" => $post["email"],
-            ];
+        if (!empty($email)) {
+            $subscribeGetList = CSubscription::GetList(["ID" => "ASC"], ["EMAIL" => $email])->GetNext();
+            if (empty($subscribeGetList)) {
+                $arRubricID = [];
+                $rubricGetList = CRubric::GetList([], ["ACTIVE" => "Y"]);
+                while ($rubric = $rubricGetList->GetNext()) {
+                    $arRubricID[] = $rubric['ID'];
+                }
 
-            if ($result = CFormResult::Add($FORM_ID, $FIELDS)) {
-                if (CFormResult::Mail($result)) {
-                    $data["status"] = "Code: 200 OK";
+                $subscribe = new CSubscription;
+                $arFields = [
+                    "USER_ID" => '',
+                    "FORMAT" => "html/text",
+                    "EMAIL" => $email,
+                    "ACTIVE" => "Y",
+                    "RUB_ID" => $arRubricID,
+                    "SEND_CONFIRM" => "N",
+                    "CONFIRMED" => "Y"
+                ];
+
+                $subscribe->Add($arFields, SITE_ID);
+
+                $FORM_ID = 1;
+                $FIELDS = [
+                    "form_text_1" => $email,
+                ];
+
+                if ($result = CFormResult::Add($FORM_ID, $FIELDS)) {
+                    if (CFormResult::Mail($result)) {
+                        $data["status"] = 200;
+                    } else {
+                        $data["status"] = 400;
+                        $data["message"] = "Ошибка: почтовое уведомление не создано";
+                    }
                 } else {
-                    $data["status"] = "Code: 400 BAD REQUEST";
+                    $data["status"] = 400;
+                    $data["message"] = "Ошибка: почтовое уведомление не создано";
                 }
             } else {
-                $data["status"] = "Code: 400 BAD REQUEST";
+                $data["status"] = 400;
+                $data["message"] = "Ошибка: Такой email зарегистрирован";
             }
+        } else {
+            $data["status"] = 400;
+            $data["message"] = "Ошибка: email не может быть пустым";
         }
 
         return $data;
